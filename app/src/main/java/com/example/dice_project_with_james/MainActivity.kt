@@ -17,13 +17,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 
 // Simple theme wrapper — teammates can expand this in ui/theme later
 @Composable
@@ -72,11 +80,45 @@ fun TenziGame() {
         R.drawable.dice6
     )
 
+    // State vars
+    var gameStarted by remember { mutableStateOf(false) }
+    var timeLeft by remember { mutableIntStateOf(30) }
+    var showGameOverDialog by remember { mutableStateOf(false) }
+
     val dice = remember {
         mutableStateListOf(*Array(10) { Die(value = (1..6).random(), held = false) })
     }
 
+    val timeColor = if (timeLeft < 10) {
+        Color.Red
+    } else {
+        Color.Black
+    }
+
+    // Timer
+    LaunchedEffect(gameStarted, timeLeft) {
+        if(gameStarted) {
+            if (timeLeft == 0) {
+                gameStarted = false
+                showGameOverDialog = true
+            } else if (timeLeft > 0) {
+                delay(1000L) // 1 second
+                timeLeft--
+            }
+        }
+    }
+
+    fun resetGame() {
+        for (i in dice.indices) {
+            dice[i] = Die(value = (1..6).random(), held = false)
+        }
+        timeLeft = 30
+        gameStarted = false
+        showGameOverDialog = false
+    }
+
     fun rollAll() {
+        if (!gameStarted) return
         for (i in dice.indices) {
             if (!dice[i].held) {
                 dice[i] = dice[i].copy(value = (1..6).random())
@@ -85,6 +127,7 @@ fun TenziGame() {
     }
 
     fun toggleHold(index: Int) {
+        if (!gameStarted) return
         dice[index] = dice[index].copy(held = !dice[index].held)
     }
 
@@ -99,6 +142,15 @@ fun TenziGame() {
             text = "TENZI",
             fontSize = 36.sp,
             fontWeight = FontWeight.Bold
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "Remaining Time: $timeLeft",
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Medium,
+            color = timeColor
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -129,9 +181,29 @@ fun TenziGame() {
 
         Spacer(modifier = Modifier.height(40.dp))
 
-        Button(onClick = { rollAll() }) {
-            Text(text = "Roll Dice", fontSize = 18.sp)
+        if (gameStarted) {
+            Button(onClick = { rollAll() }) {
+                Text(text = "Roll Dice", fontSize = 18.sp)
+            }
+        } else {
+            Button(onClick = { gameStarted = true }) {
+                Text(text = "Start Game", fontSize = 18.sp)
+            }
         }
+    }
+
+    // Game Over
+    if (showGameOverDialog) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text(text = "Game over!") },
+            text = { Text(text = "Your time has run out.") },
+            confirmButton = {
+                TextButton(onClick = { resetGame() }) {
+                    Text("Try Again")
+                }
+            }
+        )
     }
 }
 
