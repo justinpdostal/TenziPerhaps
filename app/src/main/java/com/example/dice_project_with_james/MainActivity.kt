@@ -13,13 +13,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -27,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,6 +73,12 @@ data class Die(
     val held: Boolean
 )
 
+// Data for user kvp.
+data class LeaderboardEntry(
+    val username: String,
+    val timeMs: Long
+)
+
 @Composable
 fun TenziGame() {
     val dieImages = arrayOf(
@@ -79,6 +89,28 @@ fun TenziGame() {
         R.drawable.dice5,
         R.drawable.dice6
     )
+    var startTimeMs by remember { mutableLongStateOf(0L) }
+    var currentTimeMs by remember { mutableLongStateOf(0L) }
+
+    // leaderboard variables, decided to go with
+    // Long for time, will be converted
+    // to xx:xx.xx format later.
+    var username by remember { mutableStateOf("") }
+    var elapsedTimeMs by remember { mutableLongStateOf(0L) }
+    val leaderboard = remember { // leaderboard does not have inf. persistance
+        mutableStateListOf(
+            LeaderboardEntry("---", 9999999L),
+            LeaderboardEntry("---", 9999999L),
+            LeaderboardEntry("---", 9999999L),
+            LeaderboardEntry("---", 9999999L),
+            LeaderboardEntry("---", 9999999L),
+            LeaderboardEntry("---", 9999999L),
+            LeaderboardEntry("---", 9999999L),
+            LeaderboardEntry("---", 9999999L),
+            LeaderboardEntry("---", 9999999L),
+            LeaderboardEntry("---", 9999999L)
+        )
+    }
 
     // State vars
     var gameStarted by remember { mutableStateOf(false) }
@@ -108,13 +140,53 @@ fun TenziGame() {
         }
     }
 
+//    // Thankfully, AS does threading on its own.
+//    LaunchedEffect(gameStarted) {
+//        while (gameStarted) {
+//            delay(10L)
+//            elapsedTimeMs += 10L
+//        }
+//    } WAS NOT ACCURATE
+
     fun resetGame() {
         for (i in dice.indices) {
             dice[i] = Die(value = (1..6).random(), held = false)
         }
         timeLeft = 30
+        startTimeMs = System.currentTimeMillis()
         gameStarted = false
         showGameOverDialog = false
+    }
+
+    // some weird scope thing, both of the below
+    // had to be used right here to work with
+    // invoking with the other funcs...
+
+    // note this requires all to be held
+    fun hasWon(): Boolean {
+        val firstValue = dice.first().value
+        return dice.all { it.held && it.value == firstValue }
+    }
+
+    // simple logic to update leaderboard.
+    fun updateLeaderboard(name: String, timeMs: Long) {
+        val safeName = if (name.isBlank()) "Player" else name.trim()
+
+        leaderboard.add(LeaderboardEntry(safeName, timeMs))
+
+        val sorted = leaderboard
+            .filter { it.username != "---" }// cuts out blank user
+            .sortedBy { it.timeMs } // shoutout sortedby
+            .take(10) // truncates
+
+        leaderboard.clear()
+        leaderboard.addAll(sorted)
+
+        while (leaderboard.size < 10) {
+            leaderboard.add(LeaderboardEntry("---", 9999999L))
+        }
+
+        resetGame() // flush after win
     }
 
     fun rollAll() {
@@ -124,11 +196,30 @@ fun TenziGame() {
                 dice[i] = dice[i].copy(value = (1..6).random())
             }
         }
+        if (hasWon()) {
+            gameStarted = false
+            val finalTime = System.currentTimeMillis() - startTimeMs
+            updateLeaderboard(username, finalTime)
+        }
     }
 
     fun toggleHold(index: Int) {
         if (!gameStarted) return
         dice[index] = dice[index].copy(held = !dice[index].held)
+        if (hasWon()) { // NOTE -- possible race condition
+            gameStarted = false
+            val finalTime = System.currentTimeMillis() - startTimeMs
+            updateLeaderboard(username, finalTime)
+        }
+    }
+
+    // simple conversion to standard format
+    fun formatTime(timeMs: Long): String {
+        val totalHundredths = timeMs / 10
+        val minutes = totalHundredths / 6000
+        val seconds = (totalHundredths % 6000) / 100
+        val hundredths = totalHundredths % 100
+        return "%d:%02d:%02d".format(minutes, seconds, hundredths)
     }
 
     Column(
@@ -142,6 +233,16 @@ fun TenziGame() {
             text = "TENZI",
             fontSize = 36.sp,
             fontWeight = FontWeight.Bold
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        OutlinedTextField(
+            value = username,
+            onValueChange = { username = it },
+            label = { Text("Username") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(0.85f)
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -186,8 +287,44 @@ fun TenziGame() {
                 Text(text = "Roll Dice", fontSize = 18.sp)
             }
         } else {
-            Button(onClick = { gameStarted = true }) {
+            Button(onClick = {
+                resetGame()
+                gameStarted = true
+            }) {
                 Text(text = "Start Game", fontSize = 18.sp)
+            }
+        }
+
+        // LEADERBOARD
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // subrow to separate column
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center
+        ) {
+
+            // LEFT COLUMN (1–5)
+            Column {
+                leaderboard.take(5).forEachIndexed { index, entry ->
+                    val rank = index + 1
+                    val time = if (entry.username == "---") "--:--:--" else formatTime(entry.timeMs)
+
+                    Text("$rank. ${entry.username} - $time")
+                }
+            }
+
+            Spacer(modifier = Modifier.width(24.dp))
+
+            // RIGHT COLUMN (6–10)
+            Column {
+                leaderboard.drop(5).take(5).forEachIndexed { index, entry ->
+                    val rank = index + 6
+                    val time = if (entry.username == "---") "--:--:--" else formatTime(entry.timeMs)
+
+                    Text("$rank. ${entry.username} - $time")
+                }
             }
         }
     }
